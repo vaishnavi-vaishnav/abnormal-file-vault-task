@@ -11,14 +11,21 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB
 
   const uploadMutation = useMutation({
     mutationFn: fileService.uploadFile,
-    onSuccess: () => {
-      // Invalidate and refetch files query
+    onSuccess: (data: any) => {
+      // Invalidate and refetch files and fileTypes queries
       queryClient.invalidateQueries({ queryKey: ['files'] });
+      queryClient.invalidateQueries({ queryKey: ['fileTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['files', 'summary'] });
       setSelectedFile(null);
       onUploadSuccess();
+      // Show dedup info if server indicates reuse (ref_count > 1)
+      if (data && data.stored_file && data.stored_file.ref_count > 1) {
+        setError(`Duplicate detected — saved ${(data.stored_file.size / 1024).toFixed(2)} KB of storage`);
+      }
     },
     onError: (error) => {
       setError('Failed to upload file. Please try again.');
@@ -28,7 +35,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
-      setSelectedFile(event.target.files[0]);
+      const f = event.target.files[0];
+      if (f.size > MAX_UPLOAD_SIZE) {
+        setSelectedFile(null);
+        setError(`File is too large (${(f.size / 1024 / 1024).toFixed(2)} MB). Maximum allowed is 10.00 MB.`);
+        return;
+      }
+      setSelectedFile(f);
       setError(null);
     }
   };

@@ -16,13 +16,30 @@ export const fileService = {
     return response.data;
   },
 
-  async getFiles(): Promise<FileType[]> {
-    const response = await axios.get(`${API_URL}/files/`);
+  async getFiles(params?: Record<string, any>): Promise<FileType[]> {
+    const response = await axios.get(`${API_URL}/files/`, { params });
     return response.data;
+  },
+
+  async getFileTypes(): Promise<string[]> {
+    const response = await axios.get(`${API_URL}/files/file_types/`);
+    return response.data.file_types || [];
   },
 
   async deleteFile(id: string): Promise<void> {
     await axios.delete(`${API_URL}/files/${id}/`);
+  },
+
+  async getFile(id: string): Promise<FileType> {
+    const response = await axios.get(`${API_URL}/files/${id}/`);
+    return response.data;
+  },
+
+  async fetchFileBlob(fileUrl: string): Promise<Blob> {
+    const response = await axios.get(fileUrl, {
+      responseType: 'blob',
+    });
+    return response.data;
   },
 
   async downloadFile(fileUrl: string, filename: string): Promise<void> {
