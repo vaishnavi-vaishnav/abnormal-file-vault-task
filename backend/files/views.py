@@ -4,8 +4,9 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db import transaction
 from django.db import models
-from django.db.models import F
-from django.utils.dateparse import parse_datetime
+from django.db.models import F, Sum
+from django.utils.dateparse import parse_date
+from datetime import datetime, time, timezone as dt_timezone
 import hashlib
 
 from .models import File, StoredFile
@@ -56,10 +57,10 @@ class FileViewSet(viewsets.ModelViewSet):
             except Exception:
                 pass
         if date_to:
-            try:
-                qs = qs.filter(uploaded_at__lte=date_to)
-            except Exception:
-                pass
+            parsed = parse_date(date_to)
+            if parsed:
+                end_of_day = datetime.combine(parsed, time.max, tzinfo=dt_timezone.utc)
+                qs = qs.filter(uploaded_at__lte=end_of_day)
 
         # Sorting by upload date: `order=asc` or `order=desc` (default desc)
         order = self.request.query_params.get('order')
@@ -158,18 +159,16 @@ class FileViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Return storage summary: logical vs actual and savings."""
-        total_logical = 0
-        total_actual = 0
-        stored_files = StoredFile.objects.all()
-        for s in stored_files:
-            total_actual += s.size
-            total_logical += s.size * s.ref_count
-
-        savings = total_logical - total_actual
+        agg = StoredFile.objects.aggregate(
+            total_actual=Sum('size'),
+            total_logical=Sum(F('size') * F('ref_count')),
+        )
+        total_actual = agg['total_actual'] or 0
+        total_logical = agg['total_logical'] or 0
         return Response({
             'total_actual_bytes': total_actual,
             'total_logical_bytes': total_logical,
-            'savings_bytes': savings,
+            'savings_bytes': total_logical - total_actual,
         })
 
     @action(detail=False, methods=['get'])

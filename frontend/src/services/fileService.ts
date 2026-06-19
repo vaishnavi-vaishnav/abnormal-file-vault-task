@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { File as FileType } from '../types/file';
+import { File as FileType, StorageSummary } from '../types/file';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
@@ -24,6 +24,11 @@ export const fileService = {
   async getFileTypes(): Promise<string[]> {
     const response = await axios.get(`${API_URL}/files/file_types/`);
     return response.data.file_types || [];
+  },
+
+  async getStorageSummary(): Promise<StorageSummary> {
+    const response = await axios.get(`${API_URL}/files/summary/`);
+    return response.data;
   },
 
   async deleteFile(id: string): Promise<void> {

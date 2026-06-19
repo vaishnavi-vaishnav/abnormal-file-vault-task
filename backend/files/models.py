@@ -22,6 +22,10 @@ class StoredFile(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['file_type']),
+            models.Index(fields=['size']),
+        ]
 
     def __str__(self):
         return f"StoredFile {self.id} ({self.size} bytes)"
@@ -37,6 +41,11 @@ class File(models.Model):
 
     class Meta:
         ordering = ['-uploaded_at']
+        indexes = [
+            models.Index(fields=['original_filename']),
+            models.Index(fields=['uploaded_at']),
+            models.Index(fields=['is_deleted']),
+        ]
 
     def __str__(self):
         return self.original_filename

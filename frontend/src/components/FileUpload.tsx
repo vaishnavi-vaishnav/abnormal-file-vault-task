@@ -10,26 +10,30 @@ interface FileUploadProps {
 export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB
 
   const uploadMutation = useMutation({
     mutationFn: fileService.uploadFile,
-    onSuccess: (data: any) => {
-      // Invalidate and refetch files and fileTypes queries
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['files'] });
       queryClient.invalidateQueries({ queryKey: ['fileTypes'] });
       queryClient.invalidateQueries({ queryKey: ['files', 'summary'] });
       setSelectedFile(null);
+      setError(null);
       onUploadSuccess();
-      // Show dedup info if server indicates reuse (ref_count > 1)
-      if (data && data.stored_file && data.stored_file.ref_count > 1) {
-        setError(`Duplicate detected — saved ${(data.stored_file.size / 1024).toFixed(2)} KB of storage`);
+      if (data.stored_file && data.stored_file.ref_count > 1) {
+        setSuccessMessage(
+          `Duplicate detected — linked to existing file (saved ${(data.stored_file.size / 1024).toFixed(2)} KB of storage)`
+        );
+      } else {
+        setSuccessMessage('File uploaded successfully.');
       }
     },
-    onError: (error) => {
+    onError: () => {
+      setSuccessMessage(null);
       setError('Failed to upload file. Please try again.');
-      console.error('Upload error:', error);
     },
   });
 
@@ -43,6 +47,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       }
       setSelectedFile(f);
       setError(null);
+      setSuccessMessage(null);
     }
   };
 
@@ -92,6 +97,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
         {selectedFile && (
           <div className="text-sm text-gray-600">
             Selected: {selectedFile.name}
+          </div>
+        )}
+        {successMessage && (
+          <div className="text-sm text-green-700 bg-green-50 p-2 rounded">
+            {successMessage}
           </div>
         )}
         {error && (

@@ -98,12 +98,27 @@ docker-compose up --build
 - **GET** `/api/files/`
 - Returns a list of all uploaded files
 - Response includes file metadata (name, size, type, upload date)
+- **Query parameters** (combinable):
+  - `search` — partial match on original filename
+  - `file_type` — exact MIME type (e.g. `text/plain`)
+  - `size_min` / `size_max` — file size range in bytes
+  - `date_from` / `date_to` — upload date range (`YYYY-MM-DD`)
+  - `order` — `asc` or `desc` by upload date (default: `desc`)
 
 #### Upload File
 - **POST** `/api/files/`
 - Upload a new file
 - Request: Multipart form data with 'file' field
 - Returns: File metadata including ID and upload status
+- **Deduplication**: Identical files (SHA-256 hash) reuse existing storage; `stored_file.ref_count` increments
+
+#### Storage Summary
+- **GET** `/api/files/summary/`
+- Returns deduplication savings: `total_logical_bytes`, `total_actual_bytes`, `savings_bytes`
+
+#### File Types
+- **GET** `/api/files/file_types/`
+- Returns distinct MIME types for the filter dropdown
 
 #### Get File Details
 - **GET** `/api/files/<file_id>/`

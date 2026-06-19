@@ -57,10 +57,7 @@ export const FileList: React.FC = () => {
 
   const { data: summary } = useQuery({
     queryKey: ['files', 'summary'],
-    queryFn: async () => {
-      const res = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8000/api'}/files/summary/`);
-      return res.json();
-    },
+    queryFn: fileService.getStorageSummary,
   });
 
   // Fetch available file types for dropdown
@@ -74,6 +71,7 @@ export const FileList: React.FC = () => {
     mutationFn: fileService.deleteFile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['files'] });
+      queryClient.invalidateQueries({ queryKey: ['files', 'summary'] });
     },
   });
 
@@ -236,8 +234,18 @@ export const FileList: React.FC = () => {
         </div>
       </div>
       {summary && (
-        <div className="mb-4 text-sm text-gray-600">
-          Storage saved: {(summary.savings_bytes / 1024).toFixed(2)} KB
+        <div className="mb-4 p-3 bg-gray-50 rounded text-sm text-gray-700 space-y-1">
+          <div>
+            Storage saved: <strong>{(summary.savings_bytes / 1024).toFixed(2)} KB</strong>
+            {summary.savings_bytes > 0 && summary.total_logical_bytes > 0 && (
+              <span className="text-gray-500">
+                {' '}({((summary.savings_bytes / summary.total_logical_bytes) * 100).toFixed(1)}% reduction)
+              </span>
+            )}
+          </div>
+          <div className="text-gray-500">
+            Logical: {(summary.total_logical_bytes / 1024).toFixed(2)} KB · Actual: {(summary.total_actual_bytes / 1024).toFixed(2)} KB
+          </div>
         </div>
       )}
       {!files || files.length === 0 ? (
