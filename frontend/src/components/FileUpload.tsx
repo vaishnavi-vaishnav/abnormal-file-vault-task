@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { fileService } from '../services/fileService';
+import { formatBytes } from '../utils/format';
 import { CloudArrowUpIcon } from '@heroicons/react/24/outline';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -25,7 +26,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       onUploadSuccess();
       if (data.stored_file && data.stored_file.ref_count > 1) {
         setSuccessMessage(
-          `Duplicate detected — linked to existing file (saved ${(data.stored_file.size / 1024).toFixed(2)} KB of storage)`
+          `Duplicate detected — linked to existing file (saved ${formatBytes(data.stored_file.size)} of storage)`
         );
       } else {
         setSuccessMessage('File uploaded successfully.');

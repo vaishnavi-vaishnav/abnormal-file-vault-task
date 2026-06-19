@@ -45,6 +45,7 @@ class File(models.Model):
             models.Index(fields=['original_filename']),
             models.Index(fields=['uploaded_at']),
             models.Index(fields=['is_deleted']),
+            models.Index(fields=['is_deleted', 'uploaded_at']),
         ]
 
     def __str__(self):

@@ -1,17 +1,15 @@
-from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.db import transaction
-from django.db import models
+from django.db import transaction, IntegrityError
 from django.db.models import F, Sum
+from django.db.models.functions import Lower
 from django.utils.dateparse import parse_date
 from datetime import datetime, time, timezone as dt_timezone
 import hashlib
 
 from .models import File, StoredFile
-from .serializers import FileSerializer, StoredFileSerializer
-from django.db.models.functions import Lower
+from .serializers import FileSerializer
 
 # 10 MB max upload size
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
@@ -22,55 +20,70 @@ class FileViewSet(viewsets.ModelViewSet):
     serializer_class = FileSerializer
 
     def get_queryset(self):
+        """List active files; all query-param filters combine with AND logic."""
         qs = File.objects.select_related('stored_file').filter(is_deleted=False)
+        params = self.request.query_params
 
-        # Search by original filename
-        search = self.request.query_params.get('search')
+        search = params.get('search')
         if search:
             qs = qs.filter(original_filename__icontains=search)
 
-        # Filter by file type (stored_file.file_type)
-        file_type = self.request.query_params.get('file_type')
+        file_type = params.get('file_type')
         if file_type:
-            qs = qs.filter(stored_file__file_type__iexact=file_type)
+            qs = qs.filter(stored_file__file_type=file_type)
 
-        # Size range (bytes)
-        size_min = self.request.query_params.get('size_min')
-        size_max = self.request.query_params.get('size_max')
-        if size_min:
+        size_min = params.get('size_min')
+        if size_min is not None:
             try:
                 qs = qs.filter(stored_file__size__gte=int(size_min))
-            except ValueError:
-                pass
-        if size_max:
-            try:
-                qs = qs.filter(stored_file__size__lte=int(size_max))
-            except ValueError:
+            except (TypeError, ValueError):
                 pass
 
-        # Upload date range
-        date_from = self.request.query_params.get('date_from')
-        date_to = self.request.query_params.get('date_to')
-        if date_from:
+        size_max = params.get('size_max')
+        if size_max is not None:
             try:
-                qs = qs.filter(uploaded_at__gte=date_from)
-            except Exception:
+                qs = qs.filter(stored_file__size__lte=int(size_max))
+            except (TypeError, ValueError):
                 pass
+
+        date_from = params.get('date_from')
+        if date_from:
+            parsed = parse_date(date_from)
+            if parsed:
+                start_of_day = datetime.combine(parsed, time.min, tzinfo=dt_timezone.utc)
+                qs = qs.filter(uploaded_at__gte=start_of_day)
+
+        date_to = params.get('date_to')
         if date_to:
             parsed = parse_date(date_to)
             if parsed:
                 end_of_day = datetime.combine(parsed, time.max, tzinfo=dt_timezone.utc)
                 qs = qs.filter(uploaded_at__lte=end_of_day)
 
-        # Sorting by upload date: `order=asc` or `order=desc` (default desc)
-        order = self.request.query_params.get('order')
-        if order and order.lower() == 'asc':
-            qs = qs.order_by('uploaded_at')
-        else:
-            # default to newest first
-            qs = qs.order_by('-uploaded_at')
+        order = params.get('order', 'desc')
+        if order.lower() == 'asc':
+            return qs.order_by('uploaded_at')
+        return qs.order_by('-uploaded_at')
 
-        return qs
+    def _compute_sha256(self, file_obj):
+        """Stream file in chunks to compute SHA-256 without loading entire file into memory."""
+        sha256 = hashlib.sha256()
+        for chunk in file_obj.chunks():
+            sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def _create_logical_file(self, stored, original_filename):
+        file_entry = File.objects.create(
+            stored_file=stored,
+            original_filename=original_filename,
+        )
+        serializer = self.get_serializer(file_entry)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _link_duplicate(self, stored, original_filename):
+        StoredFile.objects.filter(pk=stored.pk).update(ref_count=F('ref_count') + 1)
+        stored.refresh_from_db()
+        return self._create_logical_file(stored, original_filename)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -78,56 +91,34 @@ class FileViewSet(viewsets.ModelViewSet):
         if not file_obj:
             return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Enforce maximum file size
         if getattr(file_obj, 'size', 0) > MAX_UPLOAD_SIZE:
             return Response(
                 {'error': f'File size exceeds maximum allowed of {MAX_UPLOAD_SIZE} bytes'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Compute SHA256 hash streaming to avoid large memory use
-        sha256 = hashlib.sha256()
-        for chunk in file_obj.chunks():
-            sha256.update(chunk)
-        file_hash = sha256.hexdigest()
+        file_hash = self._compute_sha256(file_obj)
 
-        # Check for existing stored file
+        stored = StoredFile.objects.filter(file_hash=file_hash).first()
+        if stored:
+            return self._link_duplicate(stored, file_obj.name)
+
+        file_obj.seek(0)
         try:
+            with transaction.atomic():
+                stored = StoredFile.objects.create(
+                    file=file_obj,
+                    file_hash=file_hash,
+                    file_type=file_obj.content_type or '',
+                    size=file_obj.size,
+                    ref_count=1,
+                )
+        except IntegrityError:
+            # Concurrent upload of the same new content; link to the winner's StoredFile.
             stored = StoredFile.objects.get(file_hash=file_hash)
-            # Existing file: increment ref_count and create logical File pointing to it
-            stored.ref_count = models.F('ref_count') + 1
-            stored.save()
-            # Refresh to get actual integer value
-            stored.refresh_from_db()
-            file_entry = File.objects.create(
-                stored_file=stored,
-                original_filename=file_obj.name,
-            )
-            serializer = self.get_serializer(file_entry)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except StoredFile.DoesNotExist:
-            # New unique file: save StoredFile (must reset file pointer)
-            # Django's InMemoryUploadedFile/TemporaryUploadedFile will be re-used; ensure pointer at 0
-            try:
-                file_obj.open()
-            except Exception:
-                pass
-            # Create stored file record
-            stored = StoredFile.objects.create(
-                file=file_obj,
-                file_hash=file_hash,
-                file_type=file_obj.content_type or '',
-                size=file_obj.size,
-                ref_count=1,
-            )
-            file_entry = File.objects.create(
-                stored_file=stored,
-                original_filename=file_obj.name,
-            )
-            serializer = self.get_serializer(file_entry)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return self._link_duplicate(stored, file_obj.name)
 
-    # (get_queryset implemented above with filters and is_deleted exclusion)
+        return self._create_logical_file(stored, file_obj.name)
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):

@@ -90,6 +90,18 @@ docker-compose up --build
 - Frontend Application: http://localhost:3000
 - Backend API: http://localhost:8000/api
 
+## 📚 Additional Documentation
+
+- **[DESIGN.md](DESIGN.md)** — Architecture, tradeoffs, and index strategy
+
+## 🧪 Running Tests
+
+```bash
+cd backend
+source venv/bin/activate
+python manage.py test files.tests -v 2
+```
+
 ## 📝 API Documentation
 
 ### File Management Endpoints
